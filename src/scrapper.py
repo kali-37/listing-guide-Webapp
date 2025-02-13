@@ -1,14 +1,16 @@
 import httpx
+import re
 import logging
 from bs4 import BeautifulSoup
 from bs4 import Tag
 from typing import Optional
 import re
-from category_dict import Query
+from category_dict import Category, Query
 from category_dict import categories
-from category_dict import SetOffset
-import asyncio 
+import asyncio
 from asyncio import Task
+from types import ModuleType
+
 
 
 
@@ -21,11 +23,11 @@ class Colors:
     reset = "\x1b[0m"
 
 
-
 class FileHandler:
     def __init__(self, file_name):
         self.file_name = file_name
         self.init_file()
+        self.file_data = []
 
     def init_file(self):
         with open(self.file_name, "w") as f:
@@ -41,8 +43,9 @@ class FileHandler:
             f.write(",".join(data) + "\n")
 
     def write_to_file(self, data):
-        with open(self.file_name, "a") as f:
-            f.write(",".join(data) + "\n")
+        self.file_data.append(data)
+        # with open(self.file_name, "a") as f:
+            # f.write(",".join(data) + "\n")
 
 
 class Logger:
@@ -74,26 +77,123 @@ class Logger:
         self.logger.warning(self.set_color_msg(Colors.yellow, message))
 
 
-logger = Logger()
+from typing import Any
 
 
 class AsyncScraper:
-    def __init__(self,max_concurrency:int):
+    def __init__(self, max_concurrency: int):
         self.write_queue = asyncio.Queue()
         self.write_lock = asyncio.Lock()
         self.semaphore = asyncio.Semaphore(15)
-        self.file_instance:FileHandler 
+        self.file_instance: Any | FileHandler = None
+        self.logger = Logger()
 
+    async def csv_format(self, data_rows: dict):
+        """Convert extracted data to CSV format."""
+        if not data_rows:
+            return []
 
-    async def writer_task(self) -> None:
-        while True:
-            try:
-                data = await self.write_queue.get()
-                async with self.write_lock:
-                    self.file_instance.write_to_file(data)
-                self.write_queue.task_done()
-            except Exception as e:
-                logger.error(f"Error in writer task: {str(e)}")
+        csv_row = [str(value) for value in data_rows.values()]
+
+        return csv_row
+
+    async def extract_data_rows(self, rows):
+
+        for soup in rows:
+            # Find the main listing div
+            listing_div = soup.find("div", class_="find-results-new-item")
+
+            # Extract price
+            price = listing_div.find("div", class_="price").text.strip()
+
+            # Extract shop now link
+            shop_now_link = listing_div.find("div", class_="col bold-text").find(
+                "a", href=True
+            )["href"]
+
+            # Extract watchers count
+            watchers_text = listing_div.find("div", class_="text-center").text.strip()
+            watchers = watchers_text.split("*")[0].replace("Watchers:", "").strip()
+
+            # Extract title
+            title = (
+                listing_div.find("div", class_="general-info-container")
+                .find("div", class_="row")
+                .text.replace("Start: ", "")
+                .strip()
+            )
+
+            # Extract start and end dates
+            start_date = listing_div.find_all("div", class_="row normal-text")[
+                0
+            ].text.strip()
+            end_date = (
+                listing_div.find_all("div", class_="row normal-text")[1]
+                .text.replace("End:  ", "")
+                .strip()
+            )
+
+            # Extract running time
+            running_time = (
+                listing_div.find_all("div", class_="row normal-text")[2]
+                .text.replace("Running for ", "")
+                .strip()
+            )
+            data = {
+                "Price": price.replace(",", ""),
+                "Shop Now Link": shop_now_link.replace(",", ""),
+                "Watchers": watchers.replace(",", ""),
+                "Title": title.replace(",", ""),
+                "Start Date": re.sub(r"\s\(.*\)", "", start_date).replace(",", ""),
+                "End Date": re.sub(r"\s\(.*\)", "", end_date).replace(",", ""),
+                "Running Time": running_time.replace(",", ""),
+            }
+            csv_formatted = await self.csv_format(data)
+            if csv_formatted:
+                await self.write_queue.put(csv_formatted)
+
+            # self.logger.info(f"Extracted data: {csv_formatted}")
+            # file_obj.write_to_file(csv_formatted)
+
+    async def parse_html(self, response_text: str, offset: int):
+        """
+        Parses the HTML response and returns the count of 'row' divs.
+
+        Args:
+            response_text (str): The HTML content to parse.
+
+        Returns:
+            int: The count of 'row' divs found.
+        """
+        soup = BeautifulSoup(response_text, "html.parser")
+
+        # Find the main container
+        data_soup: Optional[Tag] | Any = soup.find(
+            "div", {"class": "find-results results"}
+        )
+        if not data_soup:
+            self.logger.error(f"No data found after offset :{offset}")
+            exit(0)
+
+        # Find the sub-container
+        data_containers: Optional[Tag] | Any = data_soup.find(
+            "div", {"class": "container shrink-container"}
+        )
+        if not data_containers:
+            self.logger.error("No data containers found in the HTML")
+            raise ValueError("No data containers found")
+
+        rows = data_containers.find_all("div", {"class": "row"}, recursive=False)
+        await self.extract_data_rows(rows)
+
+    async def check_end_of_results(self, response_text: str):
+        soup = BeautifulSoup(response_text, "html.parser")
+        soup = soup.find("div", class_="find-results-pagination row my-3")
+        if soup is None:
+            return False
+        if "Next" in soup.text:
+            return True
+        return False
 
     async def complete_writer_task(self, writer_task: Task) -> None:
         await self.write_queue.join()
@@ -103,103 +203,81 @@ class AsyncScraper:
         except asyncio.CancelledError:
             pass
 
+    async def writer_task(self) -> None:
+        while True:
+            try:
+                data = await self.write_queue.get()
+                async with self.write_lock:
+                    self.file_instance.write_to_file(data)
+                self.write_queue.task_done()
+            except Exception as e:
+                self.logger.error(f"Error in writer task: {str(e)}")
 
-
-
-def csv_format(data_rows: dict):
-    """Convert extracted data to CSV format."""
-    if not data_rows:
-        return []
-
-    csv_row = list(data_rows.values())
-
-    return csv_row
-
-
-def extract_data_rows(rows, file_obj: FileHandler):
-
-    for soup in rows:
-        # Find the main listing div
-        listing_div = soup.find("div", class_="find-results-new-item")
-
-        # Extract price
-        price = listing_div.find("div", class_="price").text.strip()
-
-        # Extract shop now link
-        shop_now_link = listing_div.find("div", class_="col bold-text").find(
-            "a", href=True
-        )["href"]
-
-        # Extract watchers count
-        watchers_text = listing_div.find("div", class_="text-center").text.strip()
-        watchers = watchers_text.split("*")[0].replace("Watchers:", "").strip()
-
-        # Extract title
-        title = (
-            listing_div.find("div", class_="general-info-container")
-            .find("div", class_="row")
-            .text.replace("Start: ", "")
-            .strip()
+    async def get_max_records(self, category: Category, seller_name: str):
+        url = str(Query(category, seller_name, 0))
+        self.logger.info(f"Requesting {url}")
+        response = httpx.get(
+            url,
+            timeout=30,
         )
+        match = re.search(r"([\d,]+) Result(s)* for", response.text)
+        if not match:
+            self.logger.error(f"Unable to find the total results for {category}")
+            return
+        return int(match.group(1).replace(",", ""))
 
-        # Extract start and end dates
-        start_date = listing_div.find_all("div", class_="row normal-text")[
-            0
-        ].text.strip()
-        end_date = (
-            listing_div.find_all("div", class_="row normal-text")[1]
-            .text.replace("End:  ", "")
-            .strip()
+    async def scrape_each_category_bulk(
+        self,
+        category: Category,
+        seller_name: str,
+        client: httpx.AsyncClient,
+        offset_value: int,
+    ):
+        url = str(Query(category, seller_name, offset_value))
+        self.logger.info(f"Requesting {url}")
+        response = await client.get(
+            url,
+            timeout=30,
         )
+        await self.parse_html(response.text, offset_value)
 
-        # Extract running time
-        running_time = (
-            listing_div.find_all("div", class_="row normal-text")[2]
-            .text.replace("Running for ", "")
-            .strip()
-        )
-        data = {
-            "Price": price.replace(",", ""),
-            "Shop Now Link": shop_now_link.replace(",", ""),
-            "Watchers": watchers.replace(",", ""),
-            "Title": title.replace(",", ""),
-            "Start Date": re.sub(r"\s\(.*\)", "", start_date).replace(",", ""),
-            "End Date": re.sub(r"\s\(.*\)", "", end_date).replace(",", ""),
-            "Running Time": running_time.replace(",", ""),
-        }
-        csv_formatted = csv_format(data)
-        # logger.info(f"Extracted data: {csv_formatted}")
-        file_obj.write_to_file(csv_formatted)
+    async def scrape(
+        self,
+        category: Category,
+        seller_name: str,
+        max_request=7,
+        delay=3,
+    ):
+        total_number_of_pages = await self.get_max_records(category, seller_name)
+        if not total_number_of_pages or total_number_of_pages == 0:
+            self.logger.info(f"No results found for {category}")
+            return
+        # Create bulk task for all pages with max concurrency of 15
+        # per page it has 20 listings
+        # listing can be less or equal to 20 also ,
+        # in that case we need to scrape only one time , else we need to scrape multiple times
+        tasks = []
+        client = httpx.AsyncClient()
+        for i in range(0, total_number_of_pages, 20):
+            if len(tasks) >= max_request:
+                await asyncio.gather(*tasks)
+                await asyncio.sleep(delay)
+                tasks = []
+            tasks.append(
+                self.scrape_each_category_bulk(category, seller_name, client, i)
+            )
+        await asyncio.gather(*tasks)
 
-
-def parse_html(response_text: str, offset: int, file_inst: FileHandler):
-    """
-    Parses the HTML response and returns the count of 'row' divs.
-
-    Args:
-        response_text (str): The HTML content to parse.
-
-    Returns:
-        int: The count of 'row' divs found.
-    """
-    soup = BeautifulSoup(response_text, "html.parser")
-
-    # Find the main container
-    data_soup: Optional[Tag] = soup.find("div", {"class": "find-results results"})
-    if not data_soup:
-        logger.error(f"No data found after offset :{offset}")
-        exit(0)
-
-    # Find the sub-container
-    data_containers: Optional[Tag] = data_soup.find(
-        "div", {"class": "container shrink-container"}
-    )
-    if not data_containers:
-        logger.error("No data containers found in the HTML")
-        raise ValueError("No data containers found")
-
-    rows = data_containers.find_all("div", {"class": "row"}, recursive=False)
-    csv_formatted = csv_format(extract_data_rows(rows, file_inst))
+    async def initallize_scraper(
+        self, file_name: str, selected_category: list[Category], seller_list: list[str]
+    ):
+        self.file_instance = FileHandler(file_name)
+        writer_task = asyncio.create_task(self.writer_task())
+        for seller in seller_list:
+            self.logger.info(f"Scraping for seller: {seller}")
+            for category in selected_category:
+                await self.scrape(category, seller)
+        await self.complete_writer_task(writer_task)
 
 
 def get_category_info():
@@ -252,7 +330,7 @@ def get_category_info():
     categorie = []
     list_of_categories = [int(i) for i in category.split(",")]
     if not all(i in range(1, 36) for i in list_of_categories):
-        logger.error("Invalid Category ")
+        Logger().error("Invalid Category ")
         print("Choose a valid category in range 1-35")
         input()
         return get_category_info()
@@ -261,47 +339,25 @@ def get_category_info():
     return categorie
 
 
-def check_end_of_results(response_text: str):
-    soup = BeautifulSoup(response_text, "html.parser")
-    soup = soup.find("div", class_="find-results-pagination row my-3")
-    print(soup.text)
-    if soup is None:
-        return False
-    if "Next" in soup.text:
-        return True
-    return False
+def get_seller_info():
+    seller_name = input(
+        f"{Colors.green}Please Enter the Seller Name: {Colors.reset} "
+    ).strip()
+    seller_list = [i.strip() for i in seller_name.split(",") if i != ""]
+    return seller_list
 
 
-def main():
-    seller_name = input(f"{Colors.green}Please Enter the Seller Name: {Colors.reset} ")
-    selected_category = get_category_info()
+async def scrape(seller_list, selected_category,streamlit_obj):
+    print("seller  list", seller_list)
+    # seller_list = get_seller_info()
+    # selected_category = get_category_info()
+    # file_name = "sdf.csv"
 
-    file_name = input(
-        str(
-            f"{Colors.green} Write a file name you want to save the resulting csv:{Colors.reset} "
-        )
-    )
-    file_instance = FileHandler(file_name)
-    def scrape(category, seller_name, file_instance):
-        url = str(Query(category, seller_name))
-        logger.info(f"Requesting {url}")
-        response = httpx.get(
-            url,
-            timeout=30,
-        )
-        if "0 Results" in response.text:
-            logger.error(f"Reached end of results {category}")
-            return
-        if not check_end_of_results(response.text):
-            parse_html(response.text, SetOffset.offset, file_instance)
-            logger.info(f"2: End of results reached for {category}")
-            return
-        parse_html(response.text, SetOffset.offset, file_instance)
-        SetOffset.inc_offset(20)
-        scrape(category, seller_name, file_instance)
-    for category in selected_category:
-        scrape(category, seller_name, file_instance)
+    # file_name = input(st
+    #     str(
+    #         f"{Colors.green} Write a file name you want to save the resulting csv:{Colors.reset} "
+    #     )
+    # )
+    async_obj = AsyncScraper(15)
+    await async_obj.initallize_scraper(streamlit_obj, selected_category, seller_list)
 
-
-if __name__ == "__main__":
-    main()

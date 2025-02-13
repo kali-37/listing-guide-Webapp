@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+import asyncio
 
 
 @dataclass
@@ -19,9 +20,10 @@ class Category:
 class Query:
     category: Category
     seller: str
+    offset_value: int
 
     def __str__(self):
-        return f"https://www.watchcount.com/live/-/{self.category.__str__()}/all?offset={str(SetOffset.offset)}&seller={self.seller}"
+        return f"https://www.watchcount.com/live/-/{self.category.__str__()}/all?offset={self.offset_value}&seller={self.seller}"
 
 
 @dataclass
@@ -29,17 +31,6 @@ class ScrapingTask:
     category: str
     url: str
     offset: int
-
-class SetOffset:
-    offset = 0
-
-    @classmethod
-    def inc_offset(cls, increase_unit: int):
-        cls.offset += increase_unit
-
-    @classmethod
-    def __str__(cls):
-        return f"offset={cls.offset}"
 
 
 categories = {
