@@ -1,5 +1,7 @@
+from click import File
 import httpx
 import re
+import os
 import logging
 from bs4 import BeautifulSoup
 from bs4 import Tag
@@ -9,19 +11,24 @@ from category_dict import Category, Query
 from category_dict import categories
 import asyncio
 from asyncio import Task
-from types import ModuleType
-
-
 
 
 class Colors:
-    grey = "\x1b[38;20m"
-    green = "\x1b[32;20m"
-    yellow = "\x1b[33;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
+    # grey = "\x1b[38;20m"
+    # green = "\x1b[32;20m"
+    # yellow = "\x1b[33;20m"
+    # red = "\x1b[31;20m"
+    # bold_red = "\x1b[31;1m"
+    # reset = "\x1b[0m"
+    
+    # For Streamlit processes we need to use the following ANSI escape codes
 
+    grey = ""
+    green = ""
+    yellow = ""
+    red = ""
+    bold_red = ""
+    reset = ""
 
 class FileHandler:
     def __init__(self, file_name):
@@ -41,25 +48,31 @@ class FileHandler:
                 "Running Time",
             ]
             f.write(",".join(data) + "\n")
+        print("WRITETN TO FILE ",self.file_name)
 
     def write_to_file(self, data):
-        self.file_data.append(data)
-        # with open(self.file_name, "a") as f:
-            # f.write(",".join(data) + "\n")
+        # self.file_data.append(data)
+        with open(self.file_name, "a") as f:
+            f.write(",".join(data) + "\n")
+
 
 
 class Logger:
-    def __init__(self):
+    def __init__(self, file_name):
         self.logger = logging.getLogger(__name__)
+        self.logger.handlers.clear()
         self.logger.setLevel(logging.DEBUG)
         self.formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         self.console_handler = logging.StreamHandler()
         self.console_handler.setFormatter(self.formatter)
-        self.file_handler = logging.FileHandler("app.log", mode="a", encoding="utf-8")
+        if not file_name == "":
+            self.file_handler = logging.FileHandler(
+                file_name, mode="a", encoding="utf-8"
+            )
+            self.logger.addHandler(self.file_handler)
         self.logger.addHandler(self.console_handler)
-        self.logger.addHandler(self.file_handler)
 
     def set_color_msg(self, info, message):
         return f"{info}{message}{Colors.reset}"
@@ -81,12 +94,12 @@ from typing import Any
 
 
 class AsyncScraper:
-    def __init__(self, max_concurrency: int):
+    def __init__(self):
         self.write_queue = asyncio.Queue()
         self.write_lock = asyncio.Lock()
         self.semaphore = asyncio.Semaphore(15)
-        self.file_instance: Any | FileHandler = None
-        self.logger = Logger()
+        self.data_instance: Any | FileHandler= None
+        self.logger = Logger("")
 
     async def csv_format(self, data_rows: dict):
         """Convert extracted data to CSV format."""
@@ -208,7 +221,7 @@ class AsyncScraper:
             try:
                 data = await self.write_queue.get()
                 async with self.write_lock:
-                    self.file_instance.write_to_file(data)
+                    self.data_instance.write_to_file(data)
                 self.write_queue.task_done()
             except Exception as e:
                 self.logger.error(f"Error in writer task: {str(e)}")
@@ -241,7 +254,7 @@ class AsyncScraper:
         )
         await self.parse_html(response.text, offset_value)
 
-    async def scrape(
+    async def scraper(
         self,
         category: Category,
         seller_name: str,
@@ -269,17 +282,52 @@ class AsyncScraper:
         await asyncio.gather(*tasks)
 
     async def initallize_scraper(
-        self, file_name: str, selected_category: list[Category], seller_list: list[str]
+        self,
+        selected_category: list[Category],
+        seller_list: list[str],
+        file_name,
+        log_file,
     ):
-        self.file_instance = FileHandler(file_name)
+        self.logger = Logger(log_file)
+        self.data_instance=FileHandler(file_name)
         writer_task = asyncio.create_task(self.writer_task())
         for seller in seller_list:
             self.logger.info(f"Scraping for seller: {seller}")
             for category in selected_category:
-                await self.scrape(category, seller)
+                await self.scraper(category, seller,1,1)
         await self.complete_writer_task(writer_task)
+        return self.data_instance.file_data
 
 
+async def scrape(seller_list, selected_category,file_name, log_file):
+    async_obj = AsyncScraper()
+    data_read = await async_obj.initallize_scraper(
+         selected_category, seller_list,file_name,log_file
+    )
+    os.remove(log_file)
+    print(data_read)
+    return data_read
+
+# print(asyncio.run(scrape(["humble.2"],[categories["2"],categories["3"]], "output.csv", "log.log")))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#  DUMPED  CODE
+'''
 def get_category_info():
     print(
         f"""
@@ -330,7 +378,7 @@ def get_category_info():
     categorie = []
     list_of_categories = [int(i) for i in category.split(",")]
     if not all(i in range(1, 36) for i in list_of_categories):
-        Logger().error("Invalid Category ")
+        Logger("").error("Invalid Category ")
         print("Choose a valid category in range 1-35")
         input()
         return get_category_info()
@@ -345,19 +393,4 @@ def get_seller_info():
     ).strip()
     seller_list = [i.strip() for i in seller_name.split(",") if i != ""]
     return seller_list
-
-
-async def scrape(seller_list, selected_category,streamlit_obj):
-    print("seller  list", seller_list)
-    # seller_list = get_seller_info()
-    # selected_category = get_category_info()
-    # file_name = "sdf.csv"
-
-    # file_name = input(st
-    #     str(
-    #         f"{Colors.green} Write a file name you want to save the resulting csv:{Colors.reset} "
-    #     )
-    # )
-    async_obj = AsyncScraper(15)
-    await async_obj.initallize_scraper(streamlit_obj, selected_category, seller_list)
-
+'''
