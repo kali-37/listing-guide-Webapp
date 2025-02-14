@@ -287,6 +287,8 @@ class AsyncScraper:
         seller_list: list[str],
         file_name,
         log_file,
+        max_requests,
+        delay,
     ):
         self.logger = Logger(log_file)
         self.data_instance=FileHandler(file_name)
@@ -294,15 +296,15 @@ class AsyncScraper:
         for seller in seller_list:
             self.logger.info(f"Scraping for seller: {seller}")
             for category in selected_category:
-                await self.scraper(category, seller,1,1)
+                await self.scraper(category, seller,max_requests,delay)
         await self.complete_writer_task(writer_task)
         return self.data_instance.file_data
 
 
-async def scrape(seller_list, selected_category,file_name, log_file):
+async def scrape(seller_list, selected_category,file_name, log_file,max_requests,delay):
     async_obj = AsyncScraper()
     data_read = await async_obj.initallize_scraper(
-         selected_category, seller_list,file_name,log_file
+         selected_category, seller_list,file_name,log_file,max_requests, delay
     )
     os.remove(log_file)
     print(data_read)

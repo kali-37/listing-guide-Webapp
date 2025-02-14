@@ -1,7 +1,7 @@
 import streamlit as st
 from category_dict import categories
 import asyncio
-from scrapper import scrape  # your async scraping function
+from scrapper import scrape
 import os
 import uuid
 import fcntl
@@ -9,29 +9,39 @@ import multiprocessing
 import time
 import signal
 
-# ----------------------------------------------------------------
-# Run the async scraping function inside a separate process.
-# ----------------------------------------------------------------
-def run_async_scrape(sellers_to_search, categories_to_search, file_name, log_file):
+
+def run_async_scrape(
+    sellers_to_search,
+    categories_to_search,
+    file_name,
+    log_file,
+    max_concurrency,
+    delay_after_request,
+):
     """
     Create a new event loop and run the async scrape function.
     This function is executed in a separate process.
     """
     # Reset SIGTERM to default so termination is not blocked.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
-            scrape(sellers_to_search, categories_to_search, file_name, log_file)
+            scrape(
+                sellers_to_search,
+                categories_to_search,
+                file_name,
+                log_file,
+                max_concurrency,
+                delay_after_request,
+            )
         )
     finally:
         loop.close()
 
-# ----------------------------------------------------------------
-# Log reading helper (reads new content and truncates the log)
-# ----------------------------------------------------------------
+
 def get_current_log(log_path: str):
     if not os.path.exists(log_path):
         return None
@@ -48,9 +58,7 @@ def get_current_log(log_path: str):
             fcntl.flock(f, fcntl.LOCK_UN)
     return log_text
 
-# ----------------------------------------------------------------
-# Helper to generate a unique file path.
-# ----------------------------------------------------------------
+
 def generate_file(log=False):
     if log:
         os.makedirs("logs", exist_ok=True)
@@ -59,13 +67,9 @@ def generate_file(log=False):
         os.makedirs("data", exist_ok=True)
         return os.path.join("data", f"{uuid.uuid4()}.csv")
 
-# ----------------------------------------------------------------
-# Main Streamlit Application
-# ----------------------------------------------------------------
+
 def main():
     st.title("Seller and Category Filter")
-
-    # Initialize session state variables.
     if "sellers" not in st.session_state:
         st.session_state.sellers = []
     if "scraping_active" not in st.session_state:
@@ -81,9 +85,6 @@ def main():
     if "scrape_finished" not in st.session_state:
         st.session_state.scrape_finished = False
 
-    # -------------------------------
-    # Sidebar: Filters and Inputs
-    # -------------------------------
     st.sidebar.header("Filters")
 
     def add_seller():
@@ -93,7 +94,11 @@ def main():
         st.session_state.new_seller = ""
 
     with st.sidebar.form("seller_form"):
-        st.text_input("Seller name", key="new_seller",help="Enter the name of the seller and press enter to add multiple sellers.")
+        st.text_input(
+            "Seller name",
+            key="new_seller",
+            help="Enter the name of the seller and press enter to add multiple sellers.",
+        )
         st.form_submit_button("Add Seller", on_click=add_seller)
 
     if st.session_state.sellers:
@@ -106,31 +111,42 @@ def main():
                 st.rerun()
 
     st.sidebar.subheader("Select Categories")
-    # Map category names to their objects.
     categorie = {value.name: value for _, value in categories.items()}
     selected_categories = st.sidebar.multiselect(
         "List of chosen categories", options=list(categorie.keys())
+    )
+
+    st.session_state.max_concurrency = st.sidebar.slider(
+        "Max Concurrency",
+        1,
+        15,
+        2,
+        help="Number of concurrent requests to make to the website.Note: if multiple Users are using this app at same time. It's better to keep this value low to avoid getting blocked by the website.",
+    )
+    st.session_state.delay_after_request = st.sidebar.slider(
+        "Delay after request",
+        0,
+        10,
+        0,
+        help="How many seconds to wait between requests. More delay means slower but safer scrapin.Wait in seconds after each concurrent requests to the watch.com .",
     )
 
     file_name = st.sidebar.text_input("File name", key="file_name").strip()
     if file_name and not (file_name.endswith(".csv") or file_name.endswith(".excel")):
         file_name += ".csv"
 
-    # -------------------------------
-    # Scraping Control Button
-    # -------------------------------
-    # Button label depends on whether scraping is active.
-    button_label = "Stop" if st.session_state.scraping_active else "Scrape and Save"
+    button_label = "Stop" if st.session_state.scraping_active else "Start Scrape"
     if st.sidebar.button(button_label):
         if st.session_state.scraping_active:
-            # ----- Stop pressed: try to terminate the process -----
             if st.session_state.scrape_process is not None:
                 st.sidebar.info("Attempting to stop scraping process...")
                 st.session_state.scrape_process.terminate()
                 st.session_state.scrape_process.join(timeout=1)
                 if st.session_state.scrape_process.is_alive():
-                    st.sidebar.warning("Process did not terminate with SIGTERM; force killing...")
-                    st.session_state.scrape_process.kill()  # sends SIGKILL on Unix
+                    st.sidebar.warning(
+                        "Process did not terminate with SIGTERM; force killing..."
+                    )
+                    st.session_state.scrape_process.kill()
                     st.session_state.scrape_process.join()
                 st.session_state.scrape_process = None
             st.session_state.scraping_active = False
@@ -140,15 +156,15 @@ def main():
             # ----- Start scraping -----
             errors = False
             if st.session_state.sellers == []:
-                st.sidebar.warning("Please select at least one seller")
+                st.warning("Please select at least one seller")
                 errors = True
             if not selected_categories:
-                st.sidebar.warning("Please select at least one category")
-                errors =True
+                st.warning("Please select at least one category")
+                errors = True
             elif not file_name:
-                st.sidebar.warning("Please enter a file name")
+                st.warning("Please enter a file name")
                 error = True
-            if not errors: 
+            if not errors:
                 st.session_state.scraping_active = True
                 st.session_state.scrape_finished = False
                 st.session_state.log_content = ""
@@ -162,7 +178,14 @@ def main():
 
                 p = multiprocessing.Process(
                     target=run_async_scrape,
-                    args=(sellers_to_search, categories_to_search,st.session_state.export_file, log_file),
+                    args=(
+                        sellers_to_search,
+                        categories_to_search,
+                        st.session_state.export_file,
+                        log_file,
+                        st.session_state.max_concurrency,
+                        st.session_state.delay_after_request,
+                    ),
                 )
                 p.start()
                 st.session_state.scrape_process = p
@@ -173,15 +196,14 @@ def main():
     # -------------------------------
     with st.container():
         if st.session_state.scraping_active:
-            # Use st_autorefresh for smoother log updates if available.
             try:
                 from streamlit_autorefresh import st_autorefresh
+
                 st_autorefresh(interval=1000, key="log_autorefresh")
             except ImportError:
                 time.sleep(1)
                 st.rerun()
 
-            # Read any new log output.
             new_logs = get_current_log(st.session_state.log_file)
             if new_logs:
                 st.session_state.log_content += new_logs
@@ -189,7 +211,10 @@ def main():
             st.text_area("Live Logs", st.session_state.log_content, height=300)
 
             # Check if the process has finished.
-            if st.session_state.scrape_process is not None and not st.session_state.scrape_process.is_alive():
+            if (
+                st.session_state.scrape_process is not None
+                and not st.session_state.scrape_process.is_alive()
+            ):
                 st.session_state.scraping_active = False
                 st.session_state.scrape_process = None
                 st.session_state.scrape_finished = True
@@ -197,34 +222,37 @@ def main():
                 # Do not rerun immediately so that the export popup can be shown.
         else:
             st.text_area("Live Logs", st.session_state.log_content, height=300)
-            st.info("Idle. Press 'Scrape and Save' to start scraping.")
+            st.info("Idle. Press 'Start Scrape' to start scraping.")
 
-    # -------------------------------
-    # Export Popup after Scraping Finishes
-    # -------------------------------
     if st.session_state.scrape_finished:
-        # Check if export file exists.
-        if st.session_state.export_file and os.path.exists(st.session_state.export_file):
-            # Read export file content.
-            found_data=True
+        if st.session_state.export_file and os.path.exists(
+            st.session_state.export_file
+        ):
+            print(st.session_state)
+            found_data = True
             with open(st.session_state.export_file, "r") as f:
                 export_data = f.read()
-                print(len(f.readlines()))
                 if len(f.readlines()) <= 1:
-                    found_data=False
-                    st.info("The Recent search did not return any results ,try replacing query.")
+                    found_data = False
+                    st.warning(f"No data found during recent Scrape.")
             if found_data:
+
+                def handle_download():
+                    if os.path.exists(st.session_state.export_file):
+                        os.remove(st.session_state.export_file)
+
                 st.download_button(
-                    label="Download Recent Scraped Data",
+                    label="Download Recent Scraped Data [Auto-Delete after download]",
                     data=export_data,
                     file_name=file_name,
                     mime="text/csv",
+                    on_click=handle_download,
                 )
         else:
-            st.info("Export file not available yet.")
+            st.info("Export file not available yet ,Start Scraping.")
+
 
 if __name__ == "__main__":
-    # For Unix systems, "fork" is often the best start method.
     try:
         multiprocessing.set_start_method("fork")
     except RuntimeError:
