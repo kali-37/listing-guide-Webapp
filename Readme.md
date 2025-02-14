@@ -1,90 +1,100 @@
-# Web Scraper
+# Multi-Seller eBay Scraper
 
-This project is a web scraper that extracts data from a specified category on a website and saves the results in a CSV file.
+A Streamlit-based web application for concurrent scraping of multiple sellers and categories on eBay with real-time progress monitoring and data export capabilities.
 
-## Requirements
+## Features
 
-- Python 3.x
-- Required Python packages are listed in `requirements.txt`
+- 🔄 Concurrent scraping with adjustable concurrency levels
+- 👥 Multi-seller support
+- 📑 Multiple category filtering
+- 📊 Real-time progress monitoring
+- 📤 CSV export functionality
+- 🎛️ Configurable request delays to prevent rate limiting
+- 🌐 Web interface built with Streamlit
 
-## Usage
+## Installation
 
-1. Run the scraper:
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/multi-seller-ebay-scraper.git
+cd multi-seller-ebay-scraper
+```
 
-   ```sh
-   python scrapper.py
-   ```
-
-2. Follow the prompts:
-   - Enter the seller name.
-   - Select a category by entering the corresponding number.
-   - Enter the file name to save the resulting CSV.
-
-## File Structure
-
-- `category_dict.py`: Contains the category definitions and related classes.
-- `scrapper.py`: Main script to run the web scraper.
-- `requirements.txt`: Lists the required Python packages.
-
-## Example
-
-````sh
-Please Enter the Seller Name: example_seller
-Please Enter the Category: 1
-Write a file name you want to save the resulting csv: results.csv
-Here is a
-
-Readme.md
-
- file for your project:
-
-```md
-# Web Scraper
-
-This project is a web scraper that extracts data from a specified category on a website and saves the results in a CSV file.
-
-## Requirements
-
-- Python 3.x
-- Required Python packages are listed in `requirements.txt`
-
+2. Create a virtual environment and install dependencies using uv:
+```bash
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+uv pip install -r requirements.txt
+```
 
 ## Usage
 
-1. Run the scraper:
-    ```sh
-    python scrapper.py
-    ```
+1. Start the Streamlit application:
+```bash
+streamlit run app.py
+```
 
-2. Follow the prompts:
-    - Enter the seller name.
-    - Select a category by entering the corresponding number.
-    - Enter the file name to save the resulting CSV.
+2. Access the web interface (default: http://localhost:8501)
 
-## File Structure
+3. In the sidebar:
+   - Add seller names
+   - Select categories to scrape
+   - Adjust concurrent request settings
+   - Set delay between requests
+   - Specify output filename
 
-- `category_dict.py`: Contains the category definitions and related classes.
-- `scrapper.py`: Main script to run the web scraper.
-- `requirements.txt`: Lists the required Python packages.
+4. Click "Start Scrape" to begin the scraping process
 
-## Example
+5. Monitor progress through the live logs
 
-```sh
-Please Enter the Seller Name: example_seller
-Please Enter the Category: 1
-Write a file name you want to save the resulting csv: results.csv
-````
+6. Download the CSV file when scraping is complete
 
-## Logging
+## Configuration
 
-Logs are saved in `app.log` file.
+### Concurrency Settings
+
+- **Max Concurrency**: Control the number of concurrent requests (1-15)
+  - Lower values are recommended for shared instances
+  - Default: 2
+
+- **Delay after request**: Set the delay between concurrent requests (0-10 seconds)
+  - Higher values reduce the risk of rate limiting
+  - Default: 0
+
+### File Management
+
+- Output files are stored in the `data` directory
+- Log files are stored in the `logs` directory
+- Files are automatically cleaned up after download
+
+## Cloud Deployment
+
+The application is hosted at:
+[https://kali-37-listing-guide-webapp-srcapp-4aosuh.streamlit.app/](https://kali-37-listing-guide-webapp-srcapp-4aosuh.streamlit.app/)
+
+Note: Live logs and data downloads require running the application on your own server or using a paid Streamlit cloud service.
+
+## Project Structure
+
+```
+.
+├── app.py                 # Streamlit web application
+├── scrapper.py           # Core scraping functionality
+├── category_dict.py      # Category definitions
+├── requirements.txt      # Project dependencies
+├── pyproject.toml        # Project metadata
+├── data/                 # CSV output directory
+└── logs/                 # Log file directory
+```
+
+## Dependencies
+
+- streamlit
+- httpx
+- beautifulsoup4
+- asyncio
+- streamlit-autorefresh
 
 ## License
 
-This project is licensed under the MIT License.
-
-```
-
-Make sure to replace `<repository_url>` and `<repository_directory>` with the actual URL and directory name of your repository.
-Make sure to replace `<repository_url>` and `<repository_directory>` with the actual URL and directory name of your repository.
-```
+Under MIT License
