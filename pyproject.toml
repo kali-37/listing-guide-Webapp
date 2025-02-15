@@ -8,11 +8,5 @@ dependencies = [
     "asyncio>=3.4.3",
     "bs4==0.0.2",
     "httpx==0.28.1",
-    "pyinstaller>=6.12.0",
-    "pywebview>=5.4",
-    "qtpy>=2.4.3",
     "streamlit>=1.42.0",
-    "streamlit-autorefresh>=1.0.1",
-    "streamlit-custom-notification-box>=0.1.2",
-    "streamlit-tags>=1.2.8",
 ]
