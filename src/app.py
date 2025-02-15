@@ -65,7 +65,7 @@ def main():
     if file_name and not (file_name.endswith(".csv") or file_name.endswith(".excel")):
         file_name += ".csv"
 
-    if st.sidebar.button("Start Scrape"):
+    if st.sidebar.button("Start Scrape",help="Note: This will start the scraping process. It may take a while to complete. You can't cancel it middle of the process.Make sure to select at least one seller and one category."):
         errors = False
         if st.session_state.sellers == []:
             st.warning("Please select at least one seller")
