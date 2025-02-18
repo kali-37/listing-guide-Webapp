@@ -253,7 +253,7 @@ class AsyncScraper:
         # in that case we need to scrape only one time , else we need to scrape multiple times
         tasks = []
         client = httpx.AsyncClient()
-        for i in range(0, total_number_of_pages, 20):
+        for i in range(0, min(total_number_of_pages,2000), 20):
             if len(tasks) >= max_request:
                 await asyncio.gather(*tasks)
                 await asyncio.sleep(delay)
