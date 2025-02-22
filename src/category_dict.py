@@ -23,7 +23,7 @@ class Query:
     offset_value: int
 
     def __str__(self):
-        return f"https://www.watchcount.com/live/-/{self.category.__str__()}/all?offset={self.offset_value}&seller={self.seller}"
+        return f"https://www.watchcount.com/live/-/{self.category.__str__()}/all?minPrice=150&offset={self.offset_value}&seller={self.seller}"
 
 
 @dataclass
